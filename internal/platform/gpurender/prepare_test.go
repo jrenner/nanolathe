@@ -80,9 +80,9 @@ func TestPrepareProgramsWarmsEveryBattleProgram(t *testing.T) {
 		"groundClear": newGroundClearShader, "lens": newLensShader,
 		"marker": newMarkerShader, "scorch": newScorchShader,
 		"water": newWaterShader, "stillWater": newStillWaterShader,
-		"surfaceWake": newSurfaceWakeShader,
-		"reflectionSource": newReflectionSourceShader,
-		"reflectionResolve": newReflectionResolveShader,
+		"surfaceWake":           newSurfaceWakeShader,
+		"reflectionSource":      newReflectionSourceShader,
+		"reflectionResolve":     newReflectionResolveShader,
 		"softReflectionResolve": newSoftReflectionResolveShader,
 	} {
 		shader, err := compile()
