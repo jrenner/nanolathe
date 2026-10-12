@@ -161,3 +161,45 @@ func TestFogWindowWithArtMatchesFullBuild(t *testing.T) {
 		}
 	}
 }
+
+// TestFogAxisRangeMatchesCellTest locks the range the bounded walk visits
+// against the per-cell surface test it replaces: exactly the cells passing
+// the test, in order, for either scale and cameras on, off and far off the
+// grid.
+func TestFogAxisRangeMatchesCellTest(t *testing.T) {
+	for _, scale := range []camera.ViewScale{camera.ViewScaleNative, camera.ViewScaleDetail} {
+		for _, tc := range []struct {
+			origin, camPos, count, surf, lo, hi int32
+		}{
+			{0, 0, 160, 1080, 0, 32},
+			{0, 2048, 160, 1920, -20, 52},
+			{0, -64, 24, 200, -33, 65},
+			{3, 5000, 24, 64, 0, 32},
+			{0, -5000, 24, 64, -100, 100},
+			{5, 17, 1, 1, 0, 32},
+			{0, 31, 160, 33, 31, 63},
+		} {
+			lo, hi := fogAxisRange(tc.origin, tc.camPos, tc.count, tc.surf, tc.lo, tc.hi, scale)
+			var wantLo, wantHi int32 = -1, -1
+			for i := int32(0); i < tc.count; i++ {
+				p := scale.Project((tc.origin+i)*FogTilePixels + FogTilePixels/2 - tc.camPos)
+				if p+tc.hi > 0 && p+tc.lo < tc.surf {
+					if wantLo < 0 {
+						wantLo = i
+					}
+					wantHi = i + 1
+				}
+			}
+			if wantLo < 0 {
+				wantLo, wantHi = lo, lo // empty: only emptiness is checked below
+				if lo != hi {
+					t.Fatalf("scale %d %+v: got range [%d,%d), want empty", scale, tc, lo, hi)
+				}
+				continue
+			}
+			if lo != wantLo || hi != wantHi {
+				t.Fatalf("scale %d %+v: got range [%d,%d), want [%d,%d)", scale, tc, lo, hi, wantLo, wantHi)
+			}
+		}
+	}
+}

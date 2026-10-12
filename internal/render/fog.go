@@ -286,12 +286,22 @@ func buildFogOpsWindowInto(out []FogOp, cache *visibility.FogCache, cam *camera.
 		camX, camZ, scale = cam.X, cam.Z, cam.EffectiveScale()
 	}
 	edge := scale.Px(FogTilePixels)
-	for row := int32(0); row < h; row++ {
+	// With authored bounds the walk visits only the rows and columns whose
+	// bounds can reach the surface. The range is the exact inverse of the
+	// per-cell tests below, so the emitted sequence is unchanged; without
+	// bounds every cell is still visited, as an unbounded GAF frame may
+	// cross any nominal cell edge.
+	rowLo, rowHi, colLo, colHi := int32(0), h, int32(0), w
+	if bounds != nil {
+		rowLo, rowHi = fogAxisRange(oz, camZ, h, surfH, bounds[1], bounds[3], scale)
+		colLo, colHi = fogAxisRange(ox, camX, w, surfW, bounds[0], bounds[2], scale)
+	}
+	for row := rowLo; row < rowHi; row++ {
 		y0 := scale.Project((oz+row)*FogTilePixels + FogTilePixels/2 - camZ)
 		if bounds != nil && (y0+bounds[3] <= 0 || y0+bounds[1] >= surfH) {
 			continue
 		}
-		for col := int32(0); col < w; col++ {
+		for col := colLo; col < colHi; col++ {
 			x0 := scale.Project((ox+col)*FogTilePixels + FogTilePixels/2 - camX)
 			if bounds != nil && (x0+bounds[2] <= 0 || x0+bounds[0] >= surfW) {
 				continue
@@ -316,3 +326,68 @@ func buildFogOpsWindowInto(out []FogOp, cache *visibility.FogCache, cam *camera.
 	}
 	return out
 }
+
+// fogAxisRange returns the half-open cell range on one axis whose projected
+// position can satisfy the surface test pos+hi > 0 && pos+lo < surf, where
+// pos is scale.Project((origin+i)*FogTilePixels + FogTilePixels/2 - camPos).
+// Project is a plain multiply by the whole scale (1 or 2), so the range is
+// solved directly and then nudged against the real test at both ends, which
+// keeps the result exact for either scale and any camera sign.
+func fogAxisRange(origin, camPos, count, surf, loBound, hiBound int32, scale camera.ViewScale) (int32, int32) {
+	if count <= 0 {
+		return 0, 0
+	}
+	whole, _ := scale.Whole()
+	s := int64(whole)
+	// pos(i) = arg(i) * s with arg(i) = (origin+i)*FogTilePixels + FogTilePixels/2 - camPos.
+	// pos > -hiBound  <=>  arg >= floor(-hiBound/s) + 1
+	// pos < surf-loBound <=> arg <= floor((surf-loBound-1)/s)
+	argMin := fogFloorDiv(-int64(hiBound), s) + 1
+	argMax := fogFloorDiv(int64(surf)-int64(loBound)-1, s)
+	base := int64(origin)*FogTilePixels + FogTilePixels/2 - int64(camPos)
+	lo := fogCeilDiv(argMin-base, FogTilePixels)
+	hi := fogFloorDiv(argMax-base, FogTilePixels) + 1
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > int64(count) {
+		hi = int64(count)
+	}
+	if lo > int64(count) {
+		lo = int64(count)
+	}
+	if hi < 0 {
+		hi = 0
+	}
+	pos := func(i int32) int32 {
+		return scale.Project((origin+i)*FogTilePixels + FogTilePixels/2 - camPos)
+	}
+	inside := func(i int32) bool {
+		p := pos(i)
+		return p+hiBound > 0 && p+loBound < surf
+	}
+	lo32, hi32 := int32(lo), int32(hi)
+	for lo32 > 0 && inside(lo32-1) {
+		lo32--
+	}
+	for lo32 < hi32 && !inside(lo32) {
+		lo32++
+	}
+	for hi32 < count && inside(hi32) {
+		hi32++
+	}
+	for hi32 > lo32 && !inside(hi32-1) {
+		hi32--
+	}
+	return lo32, hi32
+}
+
+func fogFloorDiv(a, b int64) int64 {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
+func fogCeilDiv(a, b int64) int64 { return -fogFloorDiv(-a, b) }
