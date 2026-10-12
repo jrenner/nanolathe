@@ -65,3 +65,29 @@ func TestPrepareTerrainReusesDrawKeysAndReleasesBothScales(t *testing.T) {
 		}
 	}
 }
+
+// TestPrepareProgramsWarmsEveryBattleProgram runs the loading-boundary
+// warm-up and then requires every constructor it covers to yield a
+// compiled, error-free program through the shared cache.
+func TestPrepareProgramsWarmsEveryBattleProgram(t *testing.T) {
+	r := &Renderer{}
+	r.PreparePrograms()
+	for name, compile := range map[string]func() (*ebiten.Shader, error){
+		"scene": newScene2DShader, "sceneDest": newSceneDestShader,
+		"fog": newFogPassShader, "aircraftShadow": newAircraftShadowShader,
+		"arrival": newArrivalShader, "distortion": newDistortionShader,
+		"groundLight": newGroundLightShader, "groundResolve": newGroundResolveShader,
+		"groundClear": newGroundClearShader, "lens": newLensShader,
+		"marker": newMarkerShader, "scorch": newScorchShader,
+		"water": newWaterShader, "stillWater": newStillWaterShader,
+		"surfaceWake": newSurfaceWakeShader,
+		"reflectionSource": newReflectionSourceShader,
+		"reflectionResolve": newReflectionResolveShader,
+		"softReflectionResolve": newSoftReflectionResolveShader,
+	} {
+		shader, err := compile()
+		if err != nil || shader == nil {
+			t.Errorf("%s: warm program = (%v, %v), want a compiled shader", name, shader, err)
+		}
+	}
+}

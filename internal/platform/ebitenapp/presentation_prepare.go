@@ -20,5 +20,6 @@ func (a *app) prepareBattlePresentation() {
 	a.c.SetEnhanced(true)
 	a.gpu.PrepareTerrain(a.c.BattleTerrainSources())
 	a.gpu.PrepareSprites(a.c.BattleSpriteFrames())
+	a.gpu.PreparePrograms()
 	a.sourcesPrepared = true
 }

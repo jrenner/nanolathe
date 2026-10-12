@@ -1,6 +1,7 @@
 package gpurender
 
 import (
+	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
@@ -39,6 +40,42 @@ func (r *Renderer) PrepareSprites(frames []*formats.GAFFrame) {
 		if f != nil && !f.Transient {
 			r.sceneFrameFor(f)
 		}
+	}
+}
+
+// PreparePrograms compiles the battle shader programs at the loading
+// boundary. Programs are process-shared and compiled on first use
+// (shader_cache.go); left lazy, each family's first appearance in a
+// battle — the first explosion's glow, the first aircraft's soft shadow
+// — pays a Kage compile inside that frame. Compiling here moves that
+// one-time cost to loading, where PrepareTerrain and PrepareSprites
+// already put the atlas uploads. Errors are not reported here: each
+// family surfaces its own compile error at use exactly as it does today,
+// and compileShader caches the outcome either way. Call only on the
+// graphics-device owner.
+func (r *Renderer) PreparePrograms() {
+	if r == nil {
+		return
+	}
+	for _, compile := range []func() (*ebiten.Shader, error){
+		newScene2DShader, newSceneDestShader,
+		newFogPassShader, newAircraftShadowShader, newArrivalShader,
+		newDistortionShader, newGroundLightShader, newGroundResolveShader,
+		newGroundClearShader, newLensShader, newMarkerShader, newScorchShader,
+		newWaterShader, newStillWaterShader, newSurfaceWakeShader,
+		newReflectionSourceShader, newReflectionResolveShader,
+		newSoftReflectionResolveShader,
+	} {
+		_, _ = compile()
+	}
+	for _, src := range []string{
+		fogOrderedShaderSource,
+		glowSourceShaderSource(), glowShrinkShaderSource(),
+		glowBlurShaderSource(), glowCompositeShaderSource(),
+		modelDirectKeyShaderSource(), modelDirectColourShaderSource(),
+		modelGroupMergeShaderSource,
+	} {
+		_, _ = compileShader(src)
 	}
 }
 
