@@ -1,7 +1,9 @@
 package client
 
 import (
+	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
+	"github.com/nanolathe-gg/nanolathe/internal/palette"
 	"github.com/nanolathe-gg/nanolathe/internal/render"
 	"github.com/nanolathe-gg/nanolathe/internal/sim/numeric"
 	"testing"
@@ -31,5 +33,37 @@ func TestAircraftShadowClearanceRefresh(t *testing.T) {
 	c.setModelLightingHeight(g, draw)
 	if g.AircraftShadowHeight != 0 {
 		t.Fatal("classic acquired Enhanced shadow metadata")
+	}
+}
+
+// Below lowDetailZoomCut the doubled supersample lane and the soft
+// aircraft shadow stop being recorded; the model keeps its native
+// corners and the ordinary silhouette route (§17, §34).
+func TestLowDetailZoomDropsUnresolvableModelDetail(t *testing.T) {
+	c := reflectionScene(t)
+	c.antiAlias = true
+	c.pal = &palette.Tables{}
+	c.effects = drawlist.AllEffects()
+	if !c.supersampleGeometry() {
+		t.Fatal("detail view lost supersampled geometry")
+	}
+	g := &drawlist.ModelGeometry{}
+	draw := &render.UnitDraw{Airborne: true, GroundY: 80 * numeric.FixedOne, WorldPos: [3]numeric.Fixed{0, 140 * numeric.FixedOne, 0}}
+	c.cam.Zoom = lowDetailZoomCut
+	if c.lowDetailZoom() || !c.supersampleGeometry() {
+		t.Fatal("the cut itself is not low detail")
+	}
+	c.cam.Zoom = lowDetailZoomCut - 1
+	if !c.lowDetailZoom() || c.supersampleGeometry() {
+		t.Fatal("below the cut supersampled geometry is still recorded")
+	}
+	c.setModelLightingHeight(g, draw)
+	if g.AircraftShadowHeight != 0 {
+		t.Fatalf("below the cut aircraft clearance = %v, want the silhouette route", g.AircraftShadowHeight)
+	}
+	c.effects.Supersample = false
+	c.cam.Zoom = camera.ZoomUnit
+	if c.supersampleGeometry() {
+		t.Fatal("the player's Supersample switch no longer wins at full zoom")
 	}
 }

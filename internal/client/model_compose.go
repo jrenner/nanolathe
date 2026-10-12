@@ -618,7 +618,7 @@ func (c *Client) supersampleModel(structure bool) bool {
 // The geometry caches carry this result in their identities, so a change of
 // either input rebuilds the lane.
 func (c *Client) supersampleGeometry() bool {
-	return c != nil && c.antiAlias && c.pal != nil && c.effects.Supersample
+	return c != nil && c.antiAlias && c.pal != nil && c.effects.Supersample && !c.lowDetailZoom()
 }
 
 // modelAnchorDoubled is a supersampled subject's placement: the whole pixel

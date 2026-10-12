@@ -33,7 +33,18 @@ const (
 	// larger than the minimap's 4x4 `radlogo` blip so a sensor dot reads against
 	// the main view's units and terrain.
 	strategicMarkerSize = 6
+	// lowDetailZoomCut is the factor below which model detail that no
+	// longer resolves on screen stops being recorded: the doubled
+	// supersample lane and the soft aircraft shadow (§17, §34). Models
+	// still draw in full; they keep their native corners and the ordinary
+	// silhouette shadow, exactly as they do with those switches off. The
+	// player's switches still win: this only removes work below the cut
+	// for a player who left the treatments on.
+	lowDetailZoomCut = camera.ZoomUnit * 3 / 4 // 0.75x
 )
+
+// lowDetailZoom reports whether this frame is below lowDetailZoomCut.
+func (c *Client) lowDetailZoom() bool { return c.liveZoom() < lowDetailZoomCut }
 
 // refreshRecordExtent recomputes the record-space extent one frame is recorded
 // against (§16.3). It runs once per recorded frame, before any world site reads
