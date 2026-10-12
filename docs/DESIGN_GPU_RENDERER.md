@@ -3797,12 +3797,19 @@ with the units; a play test found that jarring and it is — a marker stands in 
 a unit and nothing stands in for a rock, a tree or a wreck, so the map lost its
 landmarks at exactly the factor a player pulls out to read them by.
 
-Terrain below 0.5× is the 1× tile set sampled down by the transform.
-`TODO(question)`: a half-resolution tile set would sample better and cost a
-quarter of the atlas; whether the load-time cost is worth it is unmeasured. The
-recorder emits many more tiles and fog cells at a low factor. That path is
-allocation-free per frame as the rest of the recorder is, but the per-frame tile
-and cell counts grow with 1/factor², which is the cost of the view.
+Terrain below 0.5× is drawn from a cached half-resolution overview of the
+whole tile map (the modern executor's `terrainOverview`): palette indices
+decimated from the native tiles — never averaged, since an index is a colour
+name, not a quantity — built once per terrain, chunked at 2048 texels, and
+drawn as one quad per chunk through the same terrain lane. Above the cut the
+1× tile set is drawn tile by tile as before, so the rest-factor parity gate
+is untouched. This resolves the former `TODO(question)` about a
+half-resolution tile set in favour of the overview: the build is one pass
+over the tile map on the first strategic frame, and the per-frame ground
+cost stops growing with 1/factor². Fog cells are still recorded per cell at
+a low factor; the fog build now visits only cells that can reach the
+surface, but the emitted cells at minimum zoom are the map's, which is the
+cost of showing them.
 
 ### 16.11 The marker layer — contract Z8
 

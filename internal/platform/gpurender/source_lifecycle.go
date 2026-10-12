@@ -3,6 +3,7 @@ package gpurender
 import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // ResetSources retires one terrain generation after the host has joined the
@@ -110,6 +111,15 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 	}
 	r.markerAtlases = [4]markerAtlasUpload{}
 
+	for _, ov := range r.overviews {
+		if ov == nil {
+			continue
+		}
+		for _, img := range ov.chunks {
+			retire(img)
+		}
+	}
+	r.overviews = make(map[*world.Terrain]*terrainOverview)
 	r.tileAtlases = make(map[tileAtlasKey]*tileAtlas)
 	r.gafImages = make(map[*formats.GAFFrame]*ebiten.Image)
 	r.scene = sceneAtlas{

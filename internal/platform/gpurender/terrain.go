@@ -346,6 +346,160 @@ func padTileCell(buf []byte, atlasW, gx, gy, side int) {
 	copyTexel(x1, y1, gx+side-1, gy+side-1)
 }
 
+// overviewTilesPerChunk is the tile side of one overview chunk: at half
+// resolution (16 texels per 32-pixel tile) a chunk is 2048 texels, which
+// every supported device holds.
+const overviewTilesPerChunk = 128
+
+// terrainOverview is one map's half-resolution terrain picture: palette
+// indices for the whole tile map, decimated from the native tiles, split
+// into chunks no device rejects. It exists so the strategic view draws
+// the ground as a handful of quads instead of one quad per tile
+// (§16.10); it is built once per terrain and retired by ResetSources.
+type terrainOverview struct {
+	chunks  []*ebiten.Image
+	chunksX int
+}
+
+// overviewActive reports whether this Terrain draw takes the overview:
+// the native record scale at or below the strategic model cut, where a
+// tile covers at most 16 screen pixels and the recorder already replaced
+// unit models with icons (§16.10). The factor is the world region's own,
+// recorded by World; a draw with no region (zero) keeps the tile path.
+func (r *Renderer) overviewActive(scale camera.ViewScale) bool {
+	return scale.Native() && r.worldZoom > 0 && r.worldZoom <= camera.ZoomUnit/2
+}
+
+// overviewFor returns the cached overview for one terrain, building it on
+// first use.
+func (r *Renderer) overviewFor(t *world.Terrain, tileMapW, tileMapH int) *terrainOverview {
+	if ov, ok := r.overviews[t]; ok {
+		return ov
+	}
+	chunksX := (tileMapW + overviewTilesPerChunk - 1) / overviewTilesPerChunk
+	chunksY := (tileMapH + overviewTilesPerChunk - 1) / overviewTilesPerChunk
+	ov := &terrainOverview{chunksX: chunksX}
+	for cy := 0; cy < chunksY; cy++ {
+		for cx := 0; cx < chunksX; cx++ {
+			buf, w, h := overviewChunkPixels(t, tileMapW, tileMapH, cx*overviewTilesPerChunk, cy*overviewTilesPerChunk)
+			img := newRendererImage(w, h)
+			img.WritePixels(buf)
+			ov.chunks = append(ov.chunks, img)
+		}
+	}
+	if r.overviews == nil {
+		r.overviews = make(map[*world.Terrain]*terrainOverview)
+	}
+	r.overviews[t] = ov
+	return ov
+}
+
+// overviewChunkPixels builds one chunk's RGBA buffer: the red channel is
+// the palette index of the source tile pixel at twice the chunk texel
+// coordinate (decimation, so every texel is a real index — averaging
+// palette indices would invent colours), alpha opaque.
+func overviewChunkPixels(t *world.Terrain, tileMapW, tileMapH, chunkTX, chunkTY int) ([]byte, int, int) {
+	wTiles := min(overviewTilesPerChunk, tileMapW-chunkTX)
+	hTiles := min(overviewTilesPerChunk, tileMapH-chunkTY)
+	w, h := wTiles*16, hTiles*16
+	buf := make([]byte, w*h*4)
+	for i := 3; i < len(buf); i += 4 {
+		buf[i] = 255
+	}
+	for ty := 0; ty < hTiles; ty++ {
+		for tx := 0; tx < wTiles; tx++ {
+			id := int(t.TileIndices[(chunkTY+ty)*tileMapW+chunkTX+tx])
+			if id < 0 || id >= len(t.TileSet) {
+				continue
+			}
+			src := t.TileSet[id][:]
+			if len(src) < terrainTilePixels {
+				continue
+			}
+			for y := 0; y < 16; y++ {
+				dstRow := ((ty*16+y)*w + tx*16) * 4
+				srcRow := (2 * y) * terrainTileSize
+				for x := 0; x < 16; x++ {
+					buf[dstRow+x*4] = src[srcRow+2*x]
+				}
+			}
+		}
+	}
+	return buf, w, h
+}
+
+// drawOverview emits the strategic ground as one quad per overview chunk
+// intersecting the visible tile range, through the same terrain lane and
+// batch shape as the tile path. It reports whether it drew, so Terrain
+// can fall back to tiles if a chunk is missing.
+func (r *Renderer) drawOverview(c drawlist.Terrain, ov *terrainOverview, tileMapW, tileMapH int, scale camera.ViewScale) bool {
+	pixelEdge := func(v float32) int { return int(math.Ceil(float64(v) - .5)) }
+	r.worldMap = image.Rect(
+		pixelEdge(r.sched.txx(float32(scale.Project(-c.OriginX)))),
+		pixelEdge(r.sched.txy(float32(scale.Project(-c.OriginY)))),
+		pixelEdge(r.sched.txx(float32(scale.Project(int32(tileMapW*terrainTileSize)-c.OriginX)))),
+		pixelEdge(r.sched.txy(float32(scale.Project(int32(tileMapH*terrainTileSize)-c.OriginY)))),
+	)
+	r.worldMapValid = true
+	dstW := int(c.DstW)
+	dstH := int(c.DstH)
+	if dstW > r.clipW() {
+		dstW = r.clipW()
+	}
+	if dstH > r.clipH() {
+		dstH = r.clipH()
+	}
+	if dstW <= 0 || dstH <= 0 {
+		return false
+	}
+	originX := int(c.OriginX)
+	originY := int(c.OriginY)
+	startTX := max(numeric.FloorDiv(originX, terrainTileSize)-1, 0)
+	startTY := max(numeric.FloorDiv(originY, terrainTileSize)-1, 0)
+	endTX := min(numeric.FloorDiv(originX+int(scale.Inverse(int32(dstW-1))), terrainTileSize)+1, tileMapW-1)
+	endTY := min(numeric.FloorDiv(originY+int(scale.Inverse(int32(dstH-1))), terrainTileSize)+1, tileMapH-1)
+	if startTX > endTX || startTY > endTY {
+		return false
+	}
+	filter := float32(0)
+	if r.sched.worldOn {
+		filter = 1
+	}
+	for ci, img := range ov.chunks {
+		if img == nil {
+			return false
+		}
+		chunkTX := (ci % ov.chunksX) * overviewTilesPerChunk
+		chunkTY := (ci / ov.chunksX) * overviewTilesPerChunk
+		ix0, iy0 := max(startTX, chunkTX), max(startTY, chunkTY)
+		ix1, iy1 := min(endTX, chunkTX+overviewTilesPerChunk-1), min(endTY, chunkTY+overviewTilesPerChunk-1)
+		if ix0 > ix1 || iy0 > iy1 {
+			continue
+		}
+		sx := int(scale.Project(int32(ix0*terrainTileSize - originX)))
+		sy := int(scale.Project(int32(iy0*terrainTileSize - originY)))
+		sx1 := int(scale.Project(int32((ix1+1)*terrainTileSize - originX)))
+		sy1 := int(scale.Project(int32((iy1+1)*terrainTileSize - originY)))
+		dstX0, dstY0 := max(sx, 0), max(sy, 0)
+		dstX1, dstY1 := min(sx1, dstW), min(sy1, dstH)
+		if dstX0 >= dstX1 || dstY0 >= dstY1 {
+			continue
+		}
+		srcX0 := (ix0-chunkTX)*16 + (dstX0-sx)/2
+		srcY0 := (iy0-chunkTY)*16 + (dstY0-sy)/2
+		srcX1 := (ix1-chunkTX+1)*16 - (sx1-dstX1)/2
+		srcY1 := (iy1-chunkTY+1)*16 - (sy1-dstY1)/2
+		if !r.sched.begin(schedOpaque, 0, 0, dstW, dstH, [4]*ebiten.Image{3: img}) {
+			return false
+		}
+		r.sched.quad(schedOpaque,
+			float32(dstX0), float32(dstY0), float32(dstX1), float32(dstY1),
+			float32(srcX0), float32(srcY0), float32(srcX1), float32(srcY1),
+			[4]float32{}, [4]float32{filter, 0, 0, sceneOpTerrain})
+	}
+	return true
+}
+
 // atlasFor returns the cached tile atlas for one (tile set, detail tiles, scale)
 // identity, building it on first use (docs/DESIGN_GPU_RENDERER.md §2.3, §14.5).
 // A nil or empty terrain has no atlas.
@@ -390,6 +544,20 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 	// Zero is the native scale: a recorder that never set the field draws the
 	// native view (drawlist.Terrain.Scale).
 	scale := c.Scale.Norm()
+	// At or below the strategic cut the ground is the cached half-resolution
+	// overview, one quad per chunk, instead of one quad per tile (§16.10).
+	if t != nil && t.CellW > 0 && t.CellH > 0 && r.overviewActive(scale) {
+		if tileMapW, tileMapH := int(t.CellW/2), int(t.CellH/2); tileMapW > 0 && tileMapH > 0 &&
+			len(t.TileIndices) >= tileMapW*tileMapH && len(t.TileSet) > 0 {
+			if ov := r.overviewFor(t, tileMapW, tileMapH); ov != nil && r.drawOverview(c, ov, tileMapW, tileMapH, scale) {
+				r.drawWaterBed(c)
+				r.drawWater(c)
+				r.drawWaterReflections(c)
+				r.drawGroundLighting()
+				return
+			}
+		}
+	}
 	atlas := r.atlasFor(t, c.Detail, scale)
 	if atlas == nil {
 		// A nil/empty terrain draws nothing; the offscreen keeps its cleared void
@@ -438,11 +606,9 @@ func (r *Renderer) Terrain(c drawlist.Terrain) {
 	if r.sched.worldOn {
 		filter = 1
 	}
-	// TODO(question): below the strategic threshold the 1x tiles are sampled
-	// down by the world transform, nearest, one tile quad at a time
-	// (DESIGN_GPU_RENDERER §16.10). A half-resolution tile set would sample
-	// better and cost a quarter of the atlas; whether the load-time synthesis
-	// is worth it is unmeasured, so this draws the 1x set for now.
+	// Below the strategic threshold the overview above replaces this walk;
+	// this path serves every factor above the cut, where tiles are sampled
+	// at or above their native size (§16.10).
 
 	// Visible tile range. Screen column c shows world pixel originX +
 	// Inverse(c), the inverse the camera's ScreenToWorld computes (§14.2), so

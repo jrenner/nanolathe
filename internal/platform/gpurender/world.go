@@ -50,6 +50,7 @@ func (r *Renderer) World(w drawlist.WorldSpace) {
 		return
 	}
 	r.worldMapValid = false
+	r.worldZoom = w.Zoom
 	r.worldW, r.worldH = r.w, r.h
 	if int(w.RecordW) > r.worldW {
 		r.worldW = int(w.RecordW)

@@ -6,8 +6,10 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/nanolathe-gg/nanolathe/formats"
+	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/palette"
+	"github.com/nanolathe-gg/nanolathe/internal/world"
 )
 
 // Renderer is the modern (GPU) executor (docs/DESIGN_GPU_RENDERER.md §2.3,
@@ -108,6 +110,14 @@ type Renderer struct {
 	// §14.5). Keyed by pointer and scale, never ranged in a way that reaches
 	// output, so it introduces no ordering [I1].
 	tileAtlases map[tileAtlasKey]*tileAtlas
+
+	// overviews caches one half-resolution whole-map terrain picture per
+	// terrain identity, built on the first strategic-zoom Terrain draw and
+	// reused until ResetSources (§16.10 overview).
+	overviews map[*world.Terrain]*terrainOverview
+	// worldZoom is the live presentation factor of the world region being
+	// recorded, set by World on its opening marker.
+	worldZoom camera.Zoom
 
 	// gafImages caches one index texture per *formats.GAFFrame identity for the
 	// model material passes, which sample a frame directly rather than through
@@ -258,6 +268,7 @@ func NewChecked(pal *palette.Tables, w, h int) (*Renderer, error) {
 	r := &Renderer{
 		tables:      uploadTables(pal),
 		tileAtlases: make(map[tileAtlasKey]*tileAtlas),
+		overviews:   make(map[*world.Terrain]*terrainOverview),
 		gafImages:   make(map[*formats.GAFFrame]*ebiten.Image),
 		copyIdx:     [6]uint32{0, 1, 2, 1, 2, 3},
 	}
