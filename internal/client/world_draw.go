@@ -1010,7 +1010,7 @@ func (c *Client) drawFeature(f *frame.FeatureView) {
 		// once here. The lighting kind is recorded whatever the switches say;
 		// the executor gates the lighting pass itself (§30).
 		burning := false
-		if c.enhanced && f.IsBurning && c.buffer != nil {
+		if c.enhanced && f.IsBurning && c.buffer != nil && !c.strategicView() {
 			cur := c.committedFrame()
 			burning = cur != nil && SnapshotPointVisible(cur.Visibility, f.X, f.Y, f.Z, cur.ViewingPlayer)
 		}

@@ -3,9 +3,38 @@ package client
 import (
 	"testing"
 
+	"github.com/nanolathe-gg/nanolathe/internal/camera"
 	"github.com/nanolathe-gg/nanolathe/internal/drawlist"
 	"github.com/nanolathe-gg/nanolathe/internal/frame"
 )
+
+// Below the strategic cut no wreck model is drawn, so a fresh wreck
+// advertises no emission or shimmer there either (§16.10).
+func TestWreckHeatStopsAtIconZoom(t *testing.T) {
+	c, _, _ := newFeatureRasterClient(t)
+	c.enhanced = true
+	f := featureRasterView()
+	f.WreckHeatKnown = true
+	c.buffer = frame.NewBuffer()
+	*c.buffer.BeginWrite() = *stripTestFrame(true)
+	if err := c.buffer.Publish(0); err != nil {
+		t.Fatal(err)
+	}
+	var g drawlist.ModelGeometry
+	c.applyWreckHeat(&g, f)
+	if g.WreckHeatStrength <= 0 {
+		t.Fatalf("ordinary view lost wreck heat: %+v", g)
+	}
+	if c.cam == nil {
+		c.cam = &camera.Camera{}
+	}
+	c.cam.Zoom = strategicModelCut
+	g = drawlist.ModelGeometry{WreckHeatStrength: 1}
+	c.applyWreckHeat(&g, f)
+	if g.WreckEmission != [3]float32{} || g.WreckHeatStrength != 0 {
+		t.Fatalf("icon zoom retained wreck heat: %+v", g)
+	}
+}
 
 // Modern design policy, not a retail temperature model. Reused packet storage
 // must cool, and hidden/old/submerged features must not advertise heat.

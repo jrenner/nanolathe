@@ -16,7 +16,10 @@ func (c *Client) applyWreckHeat(g *drawlist.ModelGeometry, f frame.FeatureView) 
 	// wreck shimmer writes the plume's strength and clock. With both off a
 	// fresh wreck keeps its ordinary palette colour and refracts nothing.
 	glow, shimmer := c.effects.WreckGlow, c.effects.WreckShimmer
-	if !c.enhanced || (!glow && !shimmer) || !f.WreckHeatKnown || c.buffer == nil {
+	// Below the strategic cut no wreck model is drawn, so its emission and
+	// plume have nothing to attach to (§16.10); the retained light gather
+	// also skips the model build it would otherwise do for this source.
+	if !c.enhanced || (!glow && !shimmer) || !f.WreckHeatKnown || c.buffer == nil || c.strategicView() {
 		return
 	}
 	cur := c.committedFrame()
