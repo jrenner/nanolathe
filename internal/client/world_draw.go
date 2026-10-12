@@ -627,20 +627,41 @@ func (c *Client) drawFeaturePass(cur *frame.Frame, ok bool) {
 	if !ok || cur == nil || c.cam == nil {
 		return
 	}
-	win := c.worldWindow()
+	c.scanFeatures(cur, c.worldWindow())
+	for _, i := range c.shortFeatures {
+		c.drawFeature(&cur.Features[i])
+	}
+}
+
+// scanFeatures is the frame's single walk over the committed features: it
+// applies each pass's own gate once and keeps the admitted indices, in
+// slice order, for the short pass here and pass A's tall features. Pass A
+// reuses the result for the same frame and falls back to its own walk when
+// no scan ran (a test composing that pass alone).
+func (c *Client) scanFeatures(cur *frame.Frame, win worldWindow) {
+	c.shortFeatures = c.shortFeatures[:0]
+	c.tallFeatures = c.tallFeatures[:0]
+	c.featureScanFrame, c.featureScanTick, c.featureScanLen = cur, cur.Tick, len(cur.Features)
 	for i := range cur.Features {
 		f := &cur.Features[i]
-		if f.Height >= 10 {
-			continue
-		}
 		if !win.admitsCell(f.CX, f.CZ) {
 			continue
 		}
-		if !featureVisibleForFrame(cur, *f) {
+		if f.Height >= 10 {
+			if tallFeatureVisibleForFrame(cur, *f) {
+				c.tallFeatures = append(c.tallFeatures, int32(i))
+			}
 			continue
 		}
-		c.drawFeature(f)
+		if featureVisibleForFrame(cur, *f) {
+			c.shortFeatures = append(c.shortFeatures, int32(i))
+		}
 	}
+}
+
+// featureScanValid reports whether scanFeatures already ran for this frame.
+func (c *Client) featureScanValid(cur *frame.Frame) bool {
+	return c.featureScanFrame == cur && c.featureScanTick == cur.Tick && c.featureScanLen == len(cur.Features)
 }
 
 // featureVisibleForFrame applies the feature draw gate after window admission.
@@ -750,20 +771,30 @@ func (c *Client) drawWorldPass(cur *frame.Frame, ok bool) {
 	}
 	// The deferred tall features take the same gate as pass 1: the window, and
 	// nothing that reads fog [03 R-RAST-01 §6]. The ProTA owner-11 hook lives
-	// on this pass alone (tallFeatureVisibleForFrame).
-	for i := range cur.Features {
-		f := &cur.Features[i]
-		if f.Height < 10 {
-			continue
+	// on this pass alone (tallFeatureVisibleForFrame). The short pass's scan
+	// already applied it for this frame; only a pass composed alone walks
+	// the features itself.
+	if c.featureScanValid(cur) {
+		for _, i := range c.tallFeatures {
+			f := &cur.Features[i]
+			sx, sy := c.featureScreenPos(*f)
+			b.add(worldDrawable{row: featureBucketRow(f.CZ, camZ), feature: f, screenX: sx, screenY: sy, index: -1})
 		}
-		if !win.admitsCell(f.CX, f.CZ) {
-			continue
+	} else {
+		for i := range cur.Features {
+			f := &cur.Features[i]
+			if f.Height < 10 {
+				continue
+			}
+			if !win.admitsCell(f.CX, f.CZ) {
+				continue
+			}
+			if !tallFeatureVisibleForFrame(cur, *f) {
+				continue
+			}
+			sx, sy := c.featureScreenPos(*f)
+			b.add(worldDrawable{row: featureBucketRow(f.CZ, camZ), feature: f, screenX: sx, screenY: sy, index: -1})
 		}
-		if !tallFeatureVisibleForFrame(cur, *f) {
-			continue
-		}
-		sx, sy := c.featureScreenPos(*f)
-		b.add(worldDrawable{row: featureBucketRow(f.CZ, camZ), feature: f, screenX: sx, screenY: sy, index: -1})
 	}
 	b.indexFactoryOccupants(win)
 	// Stage one: both unit passes' per-unit geometry, in parallel, into slots

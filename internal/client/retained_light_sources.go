@@ -68,11 +68,22 @@ func (c *Client) recordRetainedLightSources(storage *RetainedEffectStorage) Reta
 		}
 	}
 	// Index rather than range: the window rejects most of the map's features
-	// before any of their views is copied.
+	// before any of their views is copied. One walk serves both barriers:
+	// short features are visited now, tall ones are collected and visited
+	// after the short list closes, in the same order the second walk had.
+	c.tallFeatures = c.tallFeatures[:0]
+	c.featureScanFrame = nil // the shared scan no longer describes a frame
 	for i := range cur.Features {
 		f := &cur.Features[i]
-		if f.Height < 10 && win.admitsCell(f.CX, f.CZ) && featureVisibleForFrame(cur, *f) {
-			visit(f)
+		if !win.admitsCell(f.CX, f.CZ) {
+			continue
+		}
+		if f.Height < 10 {
+			if featureVisibleForFrame(cur, *f) {
+				visit(f)
+			}
+		} else if tallFeatureVisibleForFrame(cur, *f) {
+			c.tallFeatures = append(c.tallFeatures, int32(i))
 		}
 	}
 	c.emitWorldEnd()
@@ -83,11 +94,9 @@ func (c *Client) recordRetainedLightSources(storage *RetainedEffectStorage) Reta
 	// unit ordering in that row does not change feature-to-feature ordering.
 	buckets := &c.retainedLightBuckets
 	buckets.reset()
-	for i := range cur.Features {
+	for _, i := range c.tallFeatures {
 		f := &cur.Features[i]
-		if f.Height >= 10 && win.admitsCell(f.CX, f.CZ) && tallFeatureVisibleForFrame(cur, *f) {
-			buckets.add(worldDrawable{row: featureBucketRow(f.CZ, c.cam.Z), feature: f})
-		}
+		buckets.add(worldDrawable{row: featureBucketRow(f.CZ, c.cam.Z), feature: f})
 	}
 	for _, d := range buckets.ordered() {
 		if win.admitsPassARow(d.row) {

@@ -334,6 +334,14 @@ type Client struct {
 	crtBound     bool
 	frameTick    uint32 // committed tick of the frame being composed
 	worldBuckets worldBuckets
+	// One feature scan per recorded frame, shared by the short-feature pass
+	// and pass A's tall features: indices into the committed Features slice
+	// in slice order, valid only for featureScanFrame at featureScanTick.
+	featureScanFrame *frame.Frame
+	featureScanTick  uint32
+	featureScanLen   int
+	shortFeatures    []int32
+	tallFeatures     []int32
 	// parallelRecord and recordPool are the two-stage unit record of
 	// docs/DESIGN_GPU_RENDERER.md §13.9. The pool is created on the first
 	// modern frame that would use it and parked between frames; the flag is the
