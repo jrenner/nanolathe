@@ -440,3 +440,17 @@ func TestRadarDotsAcrossModernZooms(t *testing.T) {
 		})
 	}
 }
+
+// The layout's remembered lookup answers exactly as the catalog does, also
+// when one record number arrives with another name.
+func TestStrategicIconMemoMatchesLookup(t *testing.T) {
+	c, _ := iconLayoutFixture(t)
+	var dst strategicLayoutScratch
+	for _, name := range []string{"walker", "plant", "walker", "missing", "plant"} {
+		want, _ := c.strategicIcons.Lookup(name, 0)
+		got := dst.iconFor(c.strategicIcons, name, 0)
+		if got.Family != want.Family || got.Role != want.Role || got.Rect != want.Rect || got.Atlas != want.Atlas {
+			t.Fatalf("%s: memo %+v, want %+v", name, got, want)
+		}
+	}
+}

@@ -21,6 +21,34 @@ type strategicLayoutScratch struct {
 	targets  []int         // UnitView index + 1; zero is an unidentified contact
 	contacts []pool.Handle // attack-only contact identity, never an identified target
 	slots    []int
+	// icons remembers the catalog's answer per definition record (iconFor).
+	// SetStrategicIconCatalog replaces the scratch with the catalog.
+	icons []strategicIconMemo
+}
+
+type strategicIconMemo struct {
+	set  bool
+	name string
+	icon StrategicIconDescriptor
+}
+
+// iconFor is StrategicIconCatalog.Lookup remembered per definition record. The
+// answer is a function of the name and record alone, and the lookup folds the
+// name and probes three maps, which every presented unit of every layout paid:
+// about 40% of the strategic layout in a 3,000-unit battle. Each scratch keeps
+// its own memo, so the draw and pick layouts never share one.
+func (dst *strategicLayoutScratch) iconFor(icons *StrategicIconCatalog, name string, id uint16) StrategicIconDescriptor {
+	if int(id) < len(dst.icons) {
+		if m := &dst.icons[id]; m.set && m.name == name {
+			return m.icon
+		}
+	}
+	icon, _ := icons.Lookup(name, id)
+	if int(id) >= len(dst.icons) {
+		dst.icons = append(dst.icons, make([]strategicIconMemo, int(id)+1-len(dst.icons))...)
+	}
+	dst.icons[id] = strategicIconMemo{set: true, name: name, icon: icon}
+	return icon
 }
 
 // A successful GPU submission freezes the camera used by that list. The
@@ -221,7 +249,7 @@ func (c *Client) layoutStrategicMarkers(f *frame.Frame, viewer uint8, dst *strat
 			}
 			// Only this world-visibility gate permits definition art and a unit
 			// hit target. Neither radar metadata nor the blink phase can grant it.
-			icon, _ := c.strategicIcons.Lookup(u.DefName, u.DefID)
+			icon := dst.iconFor(c.strategicIcons, u.DefName, u.DefID)
 			index := neutral // missing owner colour must not suppress a visible unit
 			if u.OwnerColorKnown {
 				if team, known := c.strategicTeamColor(u.OwnerColor); known {
