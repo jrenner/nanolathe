@@ -73,7 +73,7 @@ func (r *Renderer) PreparePrograms() {
 		glowSourceShaderSource(), glowShrinkShaderSource(),
 		glowBlurShaderSource(), glowCompositeShaderSource(),
 		modelDirectKeyShaderSource(), modelDirectColourShaderSource(),
-		modelGroupMergeShaderSource,
+		modelGroupMergeShaderSource, uploadFlushShaderSource,
 	} {
 		_, _ = compileShader(src)
 	}

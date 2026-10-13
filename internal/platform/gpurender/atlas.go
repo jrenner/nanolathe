@@ -90,6 +90,8 @@ type sceneAtlas struct {
 	// began and each page's bounding box of them, for AtlasUploads.
 	frameUploads int
 	frameUnion   []image.Rectangle
+	// written lists the images uploaded since the last flushFrameUploads.
+	written []*ebiten.Image
 }
 
 // AtlasUploads reports the most recent Execute's scene atlas uploads: how many
@@ -109,6 +111,9 @@ func (r *Renderer) AtlasUploads() (uploads, unionKB int) {
 func (a *sceneAtlas) beginFrameUploads() {
 	a.frameUploads = 0
 	clear(a.frameUnion)
+	// An image written after the last frame's flush was queued by its own
+	// draw, and may since have been retired; only this frame's are flushed.
+	a.written = a.written[:0]
 }
 
 // frameUnionKB is the largest per-page upload bounding box this frame, in KiB
@@ -241,6 +246,7 @@ func (a *sceneAtlas) upload(e sceneEntry, buf []byte) {
 	}
 	r := image.Rect(int(e.x)-pad, int(e.y)-pad, int(e.x)+w+pad, int(e.y)+h+pad)
 	img.SubImage(r).(*ebiten.Image).WritePixels(dst)
+	a.written = append(a.written, img)
 	a.frameUploads++
 	if int(e.page) >= len(a.frameUnion) {
 		a.frameUnion = append(a.frameUnion, make([]image.Rectangle, int(e.page)+1-len(a.frameUnion))...)

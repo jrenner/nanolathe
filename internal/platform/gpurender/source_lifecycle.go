@@ -23,6 +23,7 @@ func (r *Renderer) resetSources(release func(*ebiten.Image)) {
 		return
 	}
 	r.joinModelPages()
+	r.uploaded, r.scene.written = r.uploaded[:0], r.scene.written[:0]
 	if r.preview != nil {
 		r.preview.resetSources(release)
 	}

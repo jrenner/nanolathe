@@ -118,6 +118,7 @@ func (r *Renderer) transientFrameFor(f *formats.GAFFrame) sceneEntry {
 		}
 		s.image = newRendererImage(pw, ph)
 		s.image.WritePixels(buf)
+		r.scene.written = append(r.scene.written, s.image)
 	}
 	// Reserved pages name transient slots; persistent shelf-packed pages keep
 	// their existing identity and lifetime. All consumers use pageImage.

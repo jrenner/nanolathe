@@ -96,6 +96,9 @@ type fogPass struct {
 	// driver builds a staging texture per WritePixels, so the upload is skipped
 	// when they compare equal [DESIGN_GPU_RENDERER.md §11.2].
 	gridSent []byte
+	// gridWritten reports that uploadGrid wrote the texture since it was last
+	// cleared (prepareFogGrid).
+	gridWritten bool
 
 	// draws counts the device draws the most recent Fog command compiled, so the
 	// per-frame device-call budget of §11.4 can be asserted. Since §11.5 the fog
@@ -164,32 +167,14 @@ func (r *Renderer) Fog(fg drawlist.Fog) {
 		r.fogOrdered(fg, scale)
 		return
 	}
-	if !r.fog.compiled {
-		r.fog.compiled = true
-		r.fog.shader, r.fog.shaderErr = newFogPassShader()
-	}
-	if r.fog.shader == nil {
+	if r.fogShader() == nil {
 		r.fog.contentErr = r.fog.shaderErr
 		// Without a compiled pass there is nothing to draw; leave the composed
 		// surface as it is rather than guessing a fog colour (I9).
 		return
 	}
-	r.fog.ensureAtlas(fg.Gray, fg.Black, scale)
-
-	w, h := int32(r.clipW()), int32(r.clipH())
-	// The gray remap no longer reads the GRAY TABLE: in the true-colour composite
-	// it is the desaturation the table was built from, the luminance
-	// floor((r+g+b)/3) of the colour already there [03 §4.3.3](§13.2 GRAY row,
-	// §13.3). The classic byte writer's "no gray table, no gray fill" gate
-	// therefore becomes the palette gate above.
-	const grayReady = true
-
-	region := fogRegionFor(fg.Ops, w, h, scale)
-	if !region.ok {
-		return
-	}
-	r.fog.encodeGrid(region, fg.Ops, w, h, scale, grayReady)
-	if !r.fog.uploadGrid(region) {
+	region, ok := r.fogGrid(fg, scale)
+	if !ok {
 		return
 	}
 
@@ -458,6 +443,58 @@ func (f *fogPass) slotFor(family int, op *render.FogOp) (int, bool) {
 	return slot, true
 }
 
+// fogShader compiles the fog pass on first use and returns it, nil when it
+// did not compile.
+func (r *Renderer) fogShader() *ebiten.Shader {
+	if !r.fog.compiled {
+		r.fog.compiled = true
+		r.fog.shader, r.fog.shaderErr = newFogPassShader()
+	}
+	return r.fog.shader
+}
+
+// fogGrid encodes fg's cell grid for the current clip and uploads it when its
+// bytes changed, returning the region, or false when the grid draws nothing.
+func (r *Renderer) fogGrid(fg drawlist.Fog, scale camera.ViewScale) (fogRegion, bool) {
+	r.fog.ensureAtlas(fg.Gray, fg.Black, scale)
+	w, h := int32(r.clipW()), int32(r.clipH())
+	// The gray remap no longer reads the GRAY TABLE: in the true-colour composite
+	// it is the desaturation the table was built from, the luminance
+	// floor((r+g+b)/3) of the colour already there [03 §4.3.3](§13.2 GRAY row,
+	// §13.3). The classic byte writer's "no gray table, no gray fill" gate
+	// therefore becomes the palette gate in Fog.
+	const grayReady = true
+	region := fogRegionFor(fg.Ops, w, h, scale)
+	if !region.ok {
+		return region, false
+	}
+	r.fog.encodeGrid(region, fg.Ops, w, h, scale, grayReady)
+	return region, r.fog.uploadGrid(region)
+}
+
+// prepareFogGrid uploads fg's grid before the frame's first draw
+// (uploadFrameSources), under the clip the world region will set. Fog encodes
+// it again where it replays and finds the bytes already sent; a frame whose
+// clip differs there simply uploads again.
+func (r *Renderer) prepareFogGrid(fg drawlist.Fog, recordW, recordH int32) {
+	if r.surfaces[0] == nil || len(fg.Ops) == 0 || r.tables.atlas == nil {
+		return
+	}
+	scale := fogOpsScale(fg.Ops)
+	if fogNeedsOrdered(fg, scale) || r.fogShader() == nil {
+		return
+	}
+	worldW, worldH := r.worldW, r.worldH
+	r.worldW, r.worldH = max(r.w, int(recordW)), max(r.h, int(recordH))
+	r.fog.gridWritten = false
+	r.fogGrid(fg, scale)
+	if r.fog.gridWritten {
+		r.noteUpload(r.fog.grid)
+	}
+	r.noteUpload(r.fog.atlas)
+	r.worldW, r.worldH = worldW, worldH
+}
+
 // gridImageSize returns the grid texture size for this frame: the used cell
 // range, never smaller than the image already allocated, so the texture grows
 // with the visible range but is not recreated when it shrinks.
@@ -481,6 +518,7 @@ func (f *fogPass) uploadGrid(region fogRegion) bool {
 		return true
 	}
 	f.grid.WritePixels(f.gridBuf)
+	f.gridWritten = true
 	f.gridSent = append(f.gridSent[:0], f.gridBuf...)
 	return true
 }
