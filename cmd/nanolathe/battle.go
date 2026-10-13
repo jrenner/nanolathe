@@ -272,6 +272,9 @@ type battleSession struct {
 	// footerHoverFeature is recomputed every frame wherever the pointer is.
 	footerHoverUnit    pool.Handle
 	footerHoverFeature string
+	// pickMemo holds the one unit pick a cursor pass asks for repeatedly
+	// (battle_strategic_icons.go); it is live only inside updateCursor.
+	pickMemo presentedPickMemo
 
 	// minimapCameraCaptured is the presentation-only minimap camera gesture.
 	// It is set by the admitted minimap down edge, served from the following

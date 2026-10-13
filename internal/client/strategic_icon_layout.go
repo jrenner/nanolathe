@@ -81,6 +81,14 @@ func (c *Client) SetStrategicIconCatalog(icons *StrategicIconCatalog) {
 	c.strategicRecorded = strategicProjection{}
 }
 
+// StrategicHover is the instance identity SetStrategicHover last stored.
+func (c *Client) StrategicHover() uint64 {
+	if c == nil {
+		return 0
+	}
+	return c.strategicHover
+}
+
 // SetStrategicHover stores a publication instance identity, never a reusable
 // pool slot. A halo is presentation only and cannot change draw/pick priority.
 func (c *Client) SetStrategicHover(instance uint64) {

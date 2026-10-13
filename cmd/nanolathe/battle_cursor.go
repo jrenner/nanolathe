@@ -25,6 +25,8 @@ func (b *battleSession) updateCursor(cl *client.Client) {
 	}
 	mouse, _ := cl.Input().PointerSample()
 	mx, my := int32(mouse.X), int32(mouse.Y)
+	b.pickMemo = presentedPickMemo{active: true}
+	defer func() { b.pickMemo = presentedPickMemo{} }()
 	// The footer's pointer record is written by the same per-frame pointer
 	// pass, and by nothing else [07 R-HUD-03 §1].
 	b.updateFooterHover(mx, my)
@@ -210,6 +212,11 @@ func (b *battleSession) updateFooterHover(mx, my int32) {
 		}
 	}
 	if b.cl != nil {
+		// A community icon's hovered rect is its hit area, so a hover that
+		// moved can change the next pick.
+		if b.cl.StrategicHover() != iconHover {
+			b.pickMemo.valid = false
+		}
 		b.cl.SetStrategicHover(iconHover)
 	}
 	b.footerHoverFeature = ""
