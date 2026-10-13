@@ -408,7 +408,27 @@ type interpolator struct {
 	blendPrev, blendCur *frame.Frame
 	blendF16            int64
 	blendRangeFn        func(lo, hi int)
+
+	// piecesEqual remembers, per current unit, whether its two ticks' piece
+	// lanes compared equal (piecesSame, piecesDiffer, or zero for not yet
+	// compared) for the pair piecesPair names. The answer is a function of
+	// the pair alone, and a refresh-rate window blends one pair at several
+	// fractions, so later blends of the pair skip the comparison.
+	piecesPair  framePair
+	piecesEqual []uint8
 }
+
+// framePair names a pair of committed publications. A recycled frame carries
+// a new tick, so the pointers and ticks together name one pair.
+type framePair struct {
+	previous, current         *frame.Frame
+	previousTick, currentTick uint32
+}
+
+const (
+	piecesSame uint8 = 1 + iota
+	piecesDiffer
+)
 
 // Units below parallelBlendFloor blend on the recording goroutine: waking the
 // pool costs more than it saves. A chunk of parallelBlendChunk units keeps the
@@ -469,6 +489,11 @@ func (in *interpolator) blendUnits(prev, cur *frame.Frame, f16 int64) []frame.Un
 		in.pieces = append(in.pieces, nil)
 	}
 	in.prepareWalk(prev, cur)
+	if pair := (framePair{prev, cur, prev.Tick, cur.Tick}); pair != in.piecesPair {
+		in.piecesPair = pair
+		in.piecesEqual = growSlice(in.piecesEqual, len(cur.Units))
+		clear(in.piecesEqual)
+	}
 	in.blendPrev, in.blendCur, in.blendF16 = prev, cur, f16
 	if in.each == nil || len(cur.Units) < parallelBlendFloor {
 		in.blendUnitRange(0, len(cur.Units))
@@ -501,10 +526,20 @@ func (in *interpolator) blendUnitRange(lo, hi int) {
 			if h := in.walkForUnit[i]; h != nil {
 				in.pieces[i] = h.pose.Blend(in.pieces[i], p.Pieces, u.Pieces, cur.Tick, f16)
 				u.Pieces = in.pieces[i]
-			} else if !slices.Equal(p.Pieces, u.Pieces) {
+			} else {
 				// Equal lanes blend to themselves, so a unit whose script held
 				// still keeps the current tick's pieces without a copy.
-				u.Pieces = in.blendPieces(i, p.Pieces, u.Pieces, f16)
+				same := in.piecesEqual[i]
+				if same == 0 {
+					same = piecesDiffer
+					if slices.Equal(p.Pieces, u.Pieces) {
+						same = piecesSame
+					}
+					in.piecesEqual[i] = same
+				}
+				if same == piecesDiffer {
+					u.Pieces = in.blendPieces(i, p.Pieces, u.Pieces, f16)
+				}
 			}
 		}
 	}

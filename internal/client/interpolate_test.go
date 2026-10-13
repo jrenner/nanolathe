@@ -2,6 +2,7 @@ package client
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/nanolathe-gg/nanolathe/internal/camera"
@@ -81,6 +82,38 @@ func TestPiecesBlendUnlessHidden(t *testing.T) {
 	}
 	if got.Pieces[1].Tx != wu(8) {
 		t.Fatalf("piece hidden in the previous tick = %d, want the current transform %d", got.Pieces[1].Tx, wu(8))
+	}
+}
+
+// One pair blended at several fractions — a refresh-rate window's several
+// frames of one tick — reuses the pair's piece comparison, and every blend
+// still matches a fresh interpolator's; a new pair compares again.
+func TestRepeatedPairBlendsPiecesLikeAFreshBlend(t *testing.T) {
+	moving := unitAt(3, 0, 0, 0)
+	moving.Pieces = []frame.PieceView{{Tx: wu(0), RotX: 0}}
+	still := unitAt(4, wu(20), 0, 0)
+	still.Pieces = []frame.PieceView{{Tx: wu(3), RotX: 70}}
+	prev := &frame.Frame{Tick: 1, Units: []frame.UnitView{moving, still}}
+	movedTo := moving
+	movedTo.Pieces = []frame.PieceView{{Tx: wu(8), RotX: 1000}}
+	cur := &frame.Frame{Tick: 2, Units: []frame.UnitView{movedTo, still}}
+	var in interpolator
+	for _, f16 := range []int64{0, int64(fractionOne) / 4, int64(fractionOne) / 2, int64(fractionOne) - 1} {
+		var fresh interpolator
+		want := fresh.blend(prev, cur, f16)
+		got := in.blend(prev, cur, f16)
+		for i := range want.Units {
+			if !slices.Equal(got.Units[i].Pieces, want.Units[i].Pieces) {
+				t.Fatalf("fraction %d unit %d: pieces %v, want %v", f16, i, got.Units[i].Pieces, want.Units[i].Pieces)
+			}
+		}
+	}
+	// The next tick holds the first unit's pieces still and moves the second's.
+	next := &frame.Frame{Tick: 3, Units: []frame.UnitView{movedTo, still}}
+	next.Units[1].Pieces = []frame.PieceView{{Tx: wu(9), RotX: 70}}
+	got := in.blend(cur, next, int64(fractionOne)/2)
+	if got.Units[1].Pieces[0].Tx != wu(6) || got.Units[0].Pieces[0].Tx != wu(8) {
+		t.Fatalf("new pair blended pieces (%d, %d), want (%d, %d)", got.Units[0].Pieces[0].Tx, got.Units[1].Pieces[0].Tx, wu(8), wu(6))
 	}
 }
 

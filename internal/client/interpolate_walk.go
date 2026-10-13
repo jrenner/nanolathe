@@ -49,6 +49,7 @@ func (in *interpolator) resetWalk() {
 	clear(in.walkForUnit)
 	in.walkValid = false
 	in.blendValid = false
+	in.piecesPair = framePair{}
 }
 
 // prepareWalk consumes only the available adjacent publications. An older
