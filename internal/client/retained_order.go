@@ -91,7 +91,9 @@ func (o *RetainedModelOrderer) Prepare(c *Client, cur *frame.Frame) []RetainedMo
 			b.add(worldDrawable{row: featureBucketRow(f.CZ, c.cam.Z), feature: f, index: int32(i)})
 		}
 	}
-	b.indexFactoryOccupants(win)
+	if !c.strategicView() {
+		b.indexFactoryOccupants(win)
+	}
 	ordered := b.ordered()
 	for _, d := range ordered {
 		if !win.admitsPassARow(d.row) {

@@ -202,6 +202,9 @@ type worldBuckets struct {
 	childTouched  []int32
 	unitIndex     []int32       // unit slot to committed slice index plus one
 	factoryParent []pool.Handle // presentation-only grouping, indexed by committed unit
+	// occupantItems lists, in items order, the drawables that can join a
+	// factory's yard (indexFactoryOccupants).
+	occupantItems []int32
 }
 
 func (b *worldBuckets) reset() {
@@ -281,6 +284,19 @@ func (b *worldBuckets) indexChildren(units []frame.UnitView) {
 func (b *worldBuckets) indexFactoryOccupants(win worldWindow) {
 	b.factoryParent = resizeScratch(b.factoryParent, len(b.units))
 	clear(b.factoryParent)
+	// The candidates' own tests do not depend on the factory, so they are
+	// taken once, in items order, rather than once per factory: with every
+	// unit of a 3,000-unit battle in the window that was a pass over all of
+	// them for every factory.
+	b.occupantItems = b.occupantItems[:0]
+	for k, candidate := range b.items {
+		u := candidate.unit
+		if u == nil || candidate.index < 0 || !u.BMCode || u.BuildRemaining != 0 || u.MoverMode != moverModeGrounded ||
+			isCarried(*u) || len(u.Cargo) != 0 || !win.admitsPassARow(candidate.row) {
+			continue
+		}
+		b.occupantItems = append(b.occupantItems, int32(k))
+	}
 	// Only admitted drawables participate: an invisible unit cannot become
 	// visible by overlapping a visible factory, or disappear with a hidden one.
 	for _, d := range b.items {
@@ -293,12 +309,10 @@ func (b *worldBuckets) indexFactoryOccupants(win worldWindow) {
 		for tail >= 0 && b.nextChild(tail) >= 0 {
 			tail = b.nextChild(tail)
 		}
-		for _, candidate := range b.items {
+		for _, k := range b.occupantItems {
+			candidate := b.items[k]
 			u := candidate.unit
-			if u == nil || candidate.index < 0 || u.Slot == factory.Slot || !u.BMCode ||
-				u.BuildRemaining != 0 || u.MoverMode != moverModeGrounded || isCarried(*u) ||
-				len(u.Cargo) != 0 || b.isFactoryOccupant(candidate.index) || !win.admitsPassARow(candidate.row) ||
-				!factoryFootprintsOverlap(*factory, *u) {
+			if u.Slot == factory.Slot || b.isFactoryOccupant(candidate.index) || !factoryFootprintsOverlap(*factory, *u) {
 				continue
 			}
 			// A staged image has one cloak blend, owned by its carrier
@@ -796,7 +810,11 @@ func (c *Client) drawWorldPass(cur *frame.Frame, ok bool) {
 			b.add(worldDrawable{row: featureBucketRow(f.CZ, camZ), feature: f, screenX: sx, screenY: sy, index: -1})
 		}
 	}
-	b.indexFactoryOccupants(win)
+	// The strategic view presents no unit model (§16.10), and the yard
+	// grouping is read only by model composition.
+	if !c.strategicView() {
+		b.indexFactoryOccupants(win)
+	}
 	// Stage one: both unit passes' per-unit geometry, in parallel, into slots
 	// indexed by unit (docs/DESIGN_GPU_RENDERER.md §13.9). It runs over the
 	// finished bucket order and writes nothing to the list, so the two
