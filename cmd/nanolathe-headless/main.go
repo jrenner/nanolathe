@@ -357,20 +357,21 @@ func parse(args []string, output io.Writer) (headless.Request, string, profileOp
 
 // mutatorUsage names the mutator keys and their step lists from the content
 // package's own descriptors, so the flag text cannot fall behind the set: the
-// shared list, then each key with a list of its own (Builder speed).
+// shared list, then each key with a list of its own (Builder speed, and the
+// Smart makers switch's off and on).
 func mutatorUsage() string {
-	spell := func(steps []content.Factor) string {
+	spell := func(info content.MutatorInfo, steps []content.Factor) string {
 		out := make([]string, len(steps))
 		for i, step := range steps {
-			out[i] = step.String()
+			out[i] = info.Spell(step)
 		}
 		return strings.Join(out, ", ")
 	}
-	shared := spell(content.MutatorSteps)
+	shared := spell(content.MutatorInfo{Steps: content.MutatorSteps}, content.MutatorSteps)
 	var keys, own []string
 	for _, info := range content.MutatorCatalog() {
 		keys = append(keys, info.Key)
-		if steps := spell(info.Steps); steps != shared {
+		if steps := spell(info, info.Steps); steps != shared {
 			own = append(own, info.Key+" one of "+steps)
 		}
 	}
