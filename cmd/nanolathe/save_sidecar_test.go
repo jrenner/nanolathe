@@ -336,3 +336,89 @@ func TestSaveSidecarRestoresUnitRestrictions(t *testing.T) {
 		t.Fatal("a refused load changed the running battle or the selection")
 	}
 }
+
+// Smart makers follows the player's current selection on every load, while
+// every other mutator is the save's own (docs/DESIGN_MODS_MUTATORS.md §6.8,
+// §7.3): a save made without it restores with it when it is selected, its
+// metal makers marked, without the different-content warning, and the shell
+// keeps it selected; a save made with it restores without it when it is not;
+// and a save without a sidecar takes it from the selection alone.
+func TestLoadingAnySaveFollowsSmartMakers(t *testing.T) {
+	resetSaveLoadScreenState(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	health := content.Mutators{Health: content.Factor{Num: 2, Den: 1}}
+	opts := Options{Root: testsupport.RetailRoot(t), Map: "ashap plateau", Seed: 7, Mutators: health}
+	cs, err := openContent(opts)
+	if err != nil {
+		t.Skipf("retail content unavailable: %v", err)
+	}
+	defer cs.Close()
+	previous := clPtr
+	defer func() { clPtr = previous }()
+	shell, cl, err := newDirectBattleView(opts, cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer shell.teardownBattle(cl)
+	shell.opts.Root = t.TempDir()
+	millis := &shotMillisSource{}
+	for i := 0; i < 30; i++ {
+		shell.battle.millisSource = millis
+		millis.step++
+		cl.Step(1.0 / 30)
+	}
+	write := func(name string) string {
+		t.Helper()
+		if err := shell.openSaveLoadScreen(saveScreenMode, saveLoadFromBattle); err != nil || saveLoadUI == nil {
+			t.Fatalf("the save dialog did not open: %v", err)
+		}
+		saveLoadUI.SetName(name)
+		shell.commitSaveLoadWrite()
+		return session.RetailSavePath(shell.saveLoadDir(), name)
+	}
+	load := func(path string, selected content.Mutators) *session.Session {
+		t.Helper()
+		shell.opts.Mutators = selected
+		if err := shell.loadRetailSavePath(path); err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range shell.battle.messageRing().Visible() {
+			if strings.Contains(line.Text, "different content") {
+				t.Fatalf("a matching catalog warned: %q", line.Text)
+			}
+		}
+		return shell.battle.sess
+	}
+	on := content.Mutators{SmartMakers: content.SwitchOn(), Sight: content.Factor{Num: 3, Den: 1}}
+	plain := write("plain")
+
+	// Made without it, loaded with it selected: the save's Health with the
+	// selection's Smart makers, and not the selection's Sight.
+	want := health
+	want.SmartMakers = content.SwitchOn()
+	restored := load(plain, on)
+	if restored.Mutators != want || shell.opts.Mutators != want {
+		t.Fatalf("restored %q, selection %q, want %q", restored.Mutators, shell.opts.Mutators, want)
+	}
+	if maker, ok := restored.Catalog.Unit("armmakr"); !ok || !maker.SmartMaker {
+		t.Fatal("the restored catalog does not mark the stock metal maker")
+	}
+
+	// Made with it, loaded with it off: Smart makers is off.
+	smart := write("smart")
+	if sc, ok, err := save.ReadSidecar(smart); err != nil || !ok || sc.Mutators["smartMakers"] != "on" {
+		t.Fatalf("the second save does not record Smart makers: %+v %v %v", sc.Mutators, ok, err)
+	}
+	if restored = load(smart, content.Mutators{}); restored.Mutators != health || shell.opts.Mutators != health {
+		t.Fatalf("restored %q, selection %q, want %q", restored.Mutators, shell.opts.Mutators, health)
+	}
+
+	// Without a sidecar, the selection's Smart makers is the only mutator.
+	if err := save.RemoveSidecar(plain); err != nil {
+		t.Fatal(err)
+	}
+	if restored = load(plain, on); restored.Mutators != (content.Mutators{SmartMakers: content.SwitchOn()}) {
+		t.Fatalf("a save without a sidecar restored %q", restored.Mutators)
+	}
+}
