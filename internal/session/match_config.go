@@ -260,7 +260,8 @@ type MatchConfigRequest struct {
 	Community community.Features // 10
 
 	// Mutators is field 11, except Builder speed, which has its own step
-	// list and travels as required extension 19 (match_config_setup_extensions.go).
+	// list and travels as required extension 19, and the Smart makers
+	// switch, extension 20 (match_config_setup_extensions.go).
 	Mutators content.Mutators // 11
 
 	UnitRestrictions []MatchUnitRestriction // 12
@@ -431,8 +432,8 @@ func resolveMatchConfig(r MatchConfigRequest, version uint16) (EffectiveMatchCon
 	if err := c.consumeSetupExtensions(); err != nil {
 		return EffectiveMatchConfig{}, err
 	}
-	if version == 1 && (c.hasChosenStarts() || c.AlliedSight != MatchAlliedSightVersion1 || !c.Mutators.BuilderSpeed.IsIdentity()) {
-		return EffectiveMatchConfig{}, matchFieldError("configuration.version", "version 2 for chosen starts, allied sight or Builder speed")
+	if version == 1 && (c.hasChosenStarts() || c.AlliedSight != MatchAlliedSightVersion1 || !c.Mutators.BuilderSpeed.IsIdentity() || !c.Mutators.SmartMakers.IsIdentity()) {
+		return EffectiveMatchConfig{}, matchFieldError("configuration.version", "version 2 for chosen starts, allied sight, Builder speed or Smart makers")
 	}
 	if _, err := c.validate(); err != nil {
 		return EffectiveMatchConfig{}, err
@@ -447,6 +448,9 @@ func resolveMatchConfig(r MatchConfigRequest, version uint16) (EffectiveMatchCon
 	}
 	if c.Mutators.BuilderSpeed.IsIdentity() {
 		c.Mutators.BuilderSpeed = content.Factor{}
+	}
+	if c.Mutators.SmartMakers.IsIdentity() {
+		c.Mutators.SmartMakers = content.Factor{}
 	}
 	for i := range c.Seats {
 		if len(c.Seats[i].AIParams) == 0 {
@@ -577,7 +581,8 @@ func (r *MatchConfigRequest) validate() (RuleSet, error) {
 	if _, err := matchCommunityJSON(set, r.Community); err != nil {
 		return RuleSet{}, err
 	}
-	// 11. Mutators, and Builder speed on its own list (extension 19).
+	// 11. Mutators, Builder speed on its own list (extension 19) and the
+	// Smart makers switch (extension 20).
 	for i, f := range matchMutatorFields(&r.Mutators) {
 		if _, ok := matchMutatorIndex(*f); !ok {
 			return RuleSet{}, matchFieldError(fmt.Sprintf("mutators[%d]", i), "the identity or a factor on the mutator step list")
@@ -585,6 +590,9 @@ func (r *MatchConfigRequest) validate() (RuleSet, error) {
 	}
 	if _, ok := content.BuilderSpeedStepIndex(r.Mutators.BuilderSpeed); !ok {
 		return RuleSet{}, matchFieldError("mutators.builderSpeed", "the identity or a factor on the Builder speed step list")
+	}
+	if f := r.Mutators.SmartMakers; !f.IsIdentity() && f != content.SwitchOn() {
+		return RuleSet{}, matchFieldError("mutators.smartMakers", "off or on")
 	}
 	// 12. Unit restrictions.
 	if err := r.validateRestrictions(); err != nil {
