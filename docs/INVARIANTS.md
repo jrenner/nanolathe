@@ -469,8 +469,11 @@ retail baseline is Strict 3.1 *with no mutators*, and every fingerprint lock
 runs with none. Builder speed (user-authorized 2026-10-22) is the one mutator
 whose recorded factor engine code reads: a builder's script VM runs its
 build-animation functions faster and its mobile build starts once in reach
-(DESIGN_MODS_MUTATORS §6.7). It still adds no seam, no RNG and no per-tick
-state, and the identity factor leaves every path exactly retail's.
+(DESIGN_MODS_MUTATORS §6.7). Smart makers (user-authorized 2026-10-22) is the
+second: the economy switches a human player's marked metal makers with its
+energy storage after each settlement pass (DESIGN_MODS_MUTATORS §6.8). Both
+still add no seam, no RNG and no per-tick state, and with them off every path
+is exactly retail's.
 
 **Survival** (user-authorized 2026-09-23) is likewise available in every mode.
 It is a scenario — a skirmish session with a commanderless attacker slot and a
